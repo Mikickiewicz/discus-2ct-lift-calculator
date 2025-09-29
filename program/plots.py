@@ -35,102 +35,35 @@ class CLvsAoAPlot(InteractivePlotCanvas):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
 
-        # Calculate wing loading to determine stall characteristics
-        weight = models.aircraft.total_mass * 9.80665  # N
-        wing_area = models.aircraft.wing.area_m2  # m²
-        wing_loading = weight / wing_area  # N/m²
-        
-        # Bank angle affects load factor and effective stall speed
-        load_factor = 1.0 / math.cos(math.radians(params.get('bank_angle', 0.0)))
-        effective_wing_loading = wing_loading * load_factor
-        
-        # Stall AOA depends on wing loading and flap setting
-        base_stall_aoa = 15.0  # Base stall angle for clean config
-        flap_corrections = {
-            'clean': 0.0, '+1': -0.5, '+2': -1.0, 'L': -2.0, 'S': +1.0
-        }
-        flap_stall_correction = flap_corrections.get(params['flap_setting'], 0.0)
-        
-        # Wing loading effect: higher loading = lower stall AOA (simplified)
-        wing_loading_effect = -0.002 * (effective_wing_loading - 400.0)  # Reference: 400 N/m²
-        
-        stall_aoa = base_stall_aoa + flap_stall_correction + wing_loading_effect
+        # Get stall AoA from model - use same logic as in cl_from_aoa
+        _, _, delta_stall = models.flap_correction(params['flap_setting'])
+        nominal_stall_aoa = models.stall_aoa + delta_stall
+        stall_aoa = nominal_stall_aoa * 0.85  # Same as in model
 
-        # Store CL at stall for reference
-        cl_at_stall = models.cl_from_aoa(stall_aoa, params['flap_setting'])
-        
         # Calculate reasonable AoA range - don't compute beyond useful range
-        max_aoa_calc = stall_aoa + 6  # Calculate up to 6° past stall
+        max_aoa_calc = nominal_stall_aoa + 0  # Calculate up to 3° past nominal stall
         aoa_range = np.linspace(-5, max_aoa_calc, 100)
-        cl_data = []
-        
-        # Calculate CL with smooth, realistic stall behavior
-        for aoa in aoa_range:
-            cl_base = models.cl_from_aoa(aoa, params['flap_setting'])
-
-            # Apply smooth stall model - gradual transition like real wing
-            if aoa > stall_aoa - 1.5:  # Start stall effects 1.5° before stall AOA
-                # Distance from stall onset
-                stall_distance = aoa - stall_aoa
-                
-                if stall_distance <= 0:
-                    # Pre-stall buffeting region - slight CL reduction
-                    pre_stall_factor = 1.0 + 0.05 * stall_distance  # Gradual reduction
-                    # Add small buffeting oscillation
-                    buffeting = 0.015 * math.sin((aoa - (stall_aoa - 1.5)) * 8.0) * abs(stall_distance)
-                    cl_base = cl_base * pre_stall_factor + buffeting
-                else:
-                    # Post-stall region - smooth exponential decay
-                    # Use exponential decay for realistic stall behavior
-                    decay_rate = 0.4  # Controls how fast CL drops after stall
-                    stall_factor = math.exp(-decay_rate * stall_distance)
-                    
-                    # Minimum CL after deep stall (aircraft still produces some lift)
-                    min_cl_factor = 0.25
-                    stall_factor = max(min_cl_factor, stall_factor)
-                    
-                    # Apply stall reduction to CL at stall point
-                    cl_base = cl_at_stall * stall_factor
-                    
-                    # Cut off the curve if it becomes too erratic (past 5° after stall)
-                    if stall_distance > 5.0:
-                        # Flat minimum CL region
-                        cl_base = cl_at_stall * min_cl_factor
-
-            cl_data.append(cl_base)
+        cl_data = [models.cl_from_aoa(aoa, params['flap_setting']) for aoa in aoa_range]
 
         # Plot with seaborn
         df = pd.DataFrame({'AoA': aoa_range, 'CL': cl_data})
         sns.lineplot(data=df, x='AoA', y='CL', ax=ax, linewidth=2.5, color='blue')
 
-        # Mark dynamic stall AoA
-        ax.axvline(x=stall_aoa, color='orange', linestyle='--', alpha=0.7, 
-                  label=f'Stall AoA: {stall_aoa:.1f}°')
-
-        # Current point with stall correction (same logic as main curve)
-        current_cl = models.cl_from_aoa(params['aoa'], params['flap_setting'])
-        current_aoa = params['aoa']
+        # Mark stall AoA and show stall speed
+        bank_angle = params.get('bank_angle', 0.0)
+        load_factor = 1.0 / math.cos(math.radians(bank_angle)) if bank_angle > 0 else 1.0
+        stall_speed_ms = models.stall_speed(
+            params.get('altitude', 0), params['flap_setting'],
+            params.get('surface_temp', 288.15), params.get('relative_humidity', 50.0),
+            load_factor
+        )
+        stall_speed_kmh = stall_speed_ms * 3.6
         
-        # Apply same stall model as the main curve
-        if current_aoa > stall_aoa - 1.5:
-            stall_distance = current_aoa - stall_aoa
-            
-            if stall_distance <= 0:
-                # Pre-stall buffeting region
-                pre_stall_factor = 1.0 + 0.05 * stall_distance
-                buffeting = 0.015 * math.sin((current_aoa - (stall_aoa - 1.5)) * 8.0) * abs(stall_distance)
-                current_cl = current_cl * pre_stall_factor + buffeting
-            else:
-                # Post-stall region
-                decay_rate = 0.4
-                stall_factor = math.exp(-decay_rate * stall_distance)
-                min_cl_factor = 0.25
-                stall_factor = max(min_cl_factor, stall_factor)
-                
-                if stall_distance > 5.0:
-                    current_cl = cl_at_stall * min_cl_factor
-                else:
-                    current_cl = cl_at_stall * stall_factor
+        ax.axvline(x=nominal_stall_aoa, color='orange', linestyle='--', alpha=0.7, 
+                  label=f'Stall AoA: {nominal_stall_aoa:.1f}° (V_s: {stall_speed_kmh:.0f} km/h)')
+
+        # Current point - use model directly (no duplicate logic)
+        current_cl = models.cl_from_aoa(params['aoa'], params['flap_setting'])
 
         ax.scatter(params['aoa'], current_cl, color='red', s=120, zorder=5,
                   edgecolor='white', linewidth=2, label='Current State')
@@ -147,7 +80,7 @@ class CLvsAoAPlot(InteractivePlotCanvas):
         ax.grid(True, alpha=0.3)
         ax.legend()
         # Limit x-axis to reasonable range - cut off after deep stall
-        max_aoa_display = min(20, stall_aoa + 6)  # Show max 6° past stall
+        max_aoa_display = min(20, nominal_stall_aoa + 3)  # Show max 3° past nominal stall
         ax.set_xlim(-5, max_aoa_display)
 
         self.figure.tight_layout()
@@ -391,15 +324,24 @@ class PerformanceSummaryPlot(InteractivePlotCanvas):
         ax3.axis('off')
 
         # Calculate current performance
-        lift = models.lift(params['airspeed'], params['altitude'], params['aoa'])
-        drag = models.drag(params['airspeed'], params['altitude'], params['aoa'])
+        bank_angle = params.get('bank_angle', 0.0)
+        surface_temp = params.get('surface_temp', 288.15)
+        relative_humidity = params.get('relative_humidity', 50.0)
+        
+        lift = models.lift(
+            params['airspeed'], params['altitude'], params['aoa'],
+            surface_temp, relative_humidity, params['flap_setting'], bank_angle
+        )
+        drag = models.drag(
+            params['airspeed'], params['altitude'], params['aoa'],
+            surface_temp, relative_humidity, params['flap_setting']
+        )
         cl = models.cl_from_aoa(params['aoa'], params['flap_setting'])
         cd = models.cd_from_cl(cl, params['flap_setting'])
         weight = models.aircraft.total_mass * 9.80665
 
         # Calculate additional parameters
         wing_loading = weight/models.aircraft.wing.area_m2
-        bank_angle = params.get('bank_angle', 0.0)
         load_factor = 1.0 / math.cos(math.radians(bank_angle)) if bank_angle > 0 else 1.0
         
         perf_text = f"""

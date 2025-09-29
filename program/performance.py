@@ -150,5 +150,3 @@ class PerformanceCalculator:
             'speed_ms': speed_ms,
             'speed_kmh': speed_ms * 3.6
         }
-
-
