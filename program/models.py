@@ -53,7 +53,8 @@ class Atmosphere:
         return lapse_rate
 
     @staticmethod
-    def air_density(altitude_m: float, surface_temp: float, relative_humidity: float, sea_level_pressure: float = 101325.0) -> float:
+    def air_density(altitude_m: float, surface_temp: float, relative_humidity: float, 
+                   sea_level_pressure: float = 101325.0, pressure_override: float = None) -> float:
         """
         Calculate the density of moist air at a given altitude.
 
@@ -62,15 +63,22 @@ class Atmosphere:
             surface_temp (float): Surface temperature in Kelvin
             relative_humidity (float): Relative humidity in percent (0-100)
             sea_level_pressure (float): Pressure at sea level in Pa (default 101325 Pa)
+            pressure_override (float): Direct pressure in Pa (overrides altitude calculation)
 
         Returns:
             float: Air density in kg/m³
         """
         lapse_rate = Atmosphere.compute_local_lapse_rate(surface_temp, relative_humidity)
 
-        # Troposphere approximation (below 11 km)
+        # Calculate temperature at altitude
         temp = surface_temp - lapse_rate * altitude_m
-        pressure = sea_level_pressure * (temp / surface_temp) ** (Atmosphere.GRAVITY / (Atmosphere.R_D * lapse_rate))
+        
+        # Use direct pressure if provided, otherwise calculate from altitude
+        if pressure_override is not None:
+            pressure = pressure_override
+        else:
+            # Troposphere approximation (below 11 km)
+            pressure = sea_level_pressure * (temp / surface_temp) ** (Atmosphere.GRAVITY / (Atmosphere.R_D * lapse_rate))
 
         # Saturation vapor pressure (Tetens formula) [hPa]
         e_s = 6.1078 * 10 ** ((7.5 * (temp - 273.15)) / (temp - 35.85))
@@ -126,6 +134,12 @@ class LiftModel:
             'S': (-0.06, 0.004, +0.7)     # Negative flap - less effective
         }
         return flap_corrections.get(flap_setting, (0.0, 0.0, 0.0))
+        # cd after claps change
+
+    def cd_from_cl(self, cl: float, flap_setting: str = 'clean') -> float:
+        _, delta_cd, _ = self.flap_correction(flap_setting)
+        return self.cd0 + self.k * cl ** 2 + delta_cd
+
 
     def cl_from_aoa(self, aoa_deg: float, flap_setting: str = 'clean') -> float:
         """
@@ -188,10 +202,6 @@ class LiftModel:
             
             return cl_post
 
-    #cd after claps change
-    def cd_from_cl(self, cl: float, flap_setting: str = 'clean') -> float:
-        _, delta_cd, _ = self.flap_correction(flap_setting)
-        return self.cd0 + self.k * cl ** 2 + delta_cd
 
 
 
@@ -204,16 +214,23 @@ class LiftModel:
 
     def lift(self, true_airspeed: float, altitude: float, aoa_deg: float,
              surface_temp: float = 288.15, relative_humidity: float = 50.0,
-             flap_setting: str = 'clean', bank_angle_deg: float = 0.0) -> float:
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+             flap_setting: str = 'clean', bank_angle_deg: float = 0.0,
+             pressure_hpa: float = None) -> float:
+        # Convert pressure from hPa to Pa if provided
+        pressure_pa = pressure_hpa * 100 if pressure_hpa is not None else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity, 
+                                   pressure_override=pressure_pa)
         CL = self.cl_from_aoa(aoa_deg, flap_setting)
         wing_area = self.aircraft.wing.area_m2
         return 0.5 * rho * true_airspeed ** 2 * wing_area * CL
 
     def drag(self, true_airspeed: float, altitude: float, aoa_deg: float,
              surface_temp: float = 288.15, relative_humidity: float = 50.0,
-             flap_setting: str = 'clean') -> float:
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+             flap_setting: str = 'clean', pressure_hpa: float = None) -> float:
+        # Convert pressure from hPa to Pa if provided
+        pressure_pa = pressure_hpa * 100 if pressure_hpa is not None else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity,
+                                   pressure_override=pressure_pa)
         CL = self.cl_from_aoa(aoa_deg, flap_setting)
         CD = self.cd_from_cl(CL, flap_setting)
         wing_area = self.aircraft.wing.area_m2
@@ -226,14 +243,17 @@ class LiftModel:
     
     def stall_speed(self, altitude: float = 0, flap_setting: str = 'clean', 
                    surface_temp: float = 288.15, relative_humidity: float = 50.0,
-                   load_factor: float = 1.0) -> float:
+                   load_factor: float = 1.0, pressure_hpa: float = None) -> float:
         """
         Calculate stall speed for given conditions.
         
         Returns:
             float: Stall speed in m/s
         """
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+        # Convert pressure from hPa to Pa if provided
+        pressure_pa = pressure_hpa * 100 if pressure_hpa is not None else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity,
+                                   pressure_override=pressure_pa)
         weight = self.aircraft.total_mass * Atmosphere.GRAVITY * load_factor
         wing_area = self.aircraft.wing.area_m2
         

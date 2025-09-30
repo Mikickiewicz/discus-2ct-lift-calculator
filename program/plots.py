@@ -52,10 +52,11 @@ class CLvsAoAPlot(InteractivePlotCanvas):
         # Mark stall AoA and show stall speed
         bank_angle = params.get('bank_angle', 0.0)
         load_factor = 1.0 / math.cos(math.radians(bank_angle)) if bank_angle > 0 else 1.0
+        weather_data = params.get('weather', {})
         stall_speed_ms = models.stall_speed(
             params.get('altitude', 0), params['flap_setting'],
             params.get('surface_temp', 288.15), params.get('relative_humidity', 50.0),
-            load_factor
+            load_factor, pressure_hpa=weather_data.get('pressure_hpa')
         )
         stall_speed_kmh = stall_speed_ms * 3.6
         
@@ -69,7 +70,9 @@ class CLvsAoAPlot(InteractivePlotCanvas):
                   edgecolor='white', linewidth=2, label='Current State')
 
         # Best L/D point
-        best_aoa, _, _ = performance.find_best_glide_ratio(params['flap_setting'])
+        weather_data = params.get('weather', {})
+        best_aoa, _, _ = performance.find_best_glide_ratio(
+            params['flap_setting'], pressure_hpa=weather_data.get('pressure_hpa'))
         best_cl = models.cl_from_aoa(best_aoa, params['flap_setting'])
         ax.scatter(best_aoa, best_cl, color='green', s=120, zorder=5,
                   marker='*', edgecolor='white', linewidth=2, label='Best L/D')
@@ -108,8 +111,11 @@ class SpeedPolarPlot(InteractivePlotCanvas):
         altitude = min(params.get('altitude', 0), 8000)  # Cap at practical ceiling
         surface_temp = params.get('surface_temp', 288.15)
         relative_humidity = params.get('relative_humidity', 50.0)
+        weather_data = params.get('weather', {})
         from models import Atmosphere
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+        pressure_pa = weather_data.get('pressure_hpa') * 100 if weather_data.get('pressure_hpa') else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity, 
+                                   pressure_override=pressure_pa)
         
         # Dynamic speed range based on wing loading and aircraft limits
         # Stall speed calculation (more accurate)
@@ -178,10 +184,11 @@ class SpeedPolarPlot(InteractivePlotCanvas):
 
         # Current point
         current_speed_kmh = params['airspeed'] * 3.6
+        weather_data = params.get('weather', {})
         current_perf = performance.performance_at_speed(
             params['airspeed'], params['altitude'], params['flap_setting'],
             params.get('surface_temp', 288.15), params.get('relative_humidity', 50.0),
-            params.get('bank_angle', 0.0)
+            params.get('bank_angle', 0.0), pressure_hpa=weather_data.get('pressure_hpa')
         )
         if current_perf:
             current_sink = current_perf.get('sink_rate', 1)
@@ -193,8 +200,11 @@ class SpeedPolarPlot(InteractivePlotCanvas):
                   zorder=5, edgecolor='white', linewidth=2, label='Current')
 
         # Best glide speed point
+        weather_data = params.get('weather', {})
         best_speed, best_ld = performance.best_glide_speed(
-            params['altitude'], params['flap_setting']
+            params['altitude'], params['flap_setting'],
+            params.get('surface_temp', 288.15), params.get('relative_humidity', 50.0),
+            pressure_hpa=weather_data.get('pressure_hpa')
         )
         best_sink = best_speed / best_ld
         ax.scatter(best_speed * 3.6, best_sink, color='green', s=150,
@@ -246,7 +256,9 @@ class PolarPlot(InteractivePlotCanvas):
         ax.scatter(current_cd, current_cl, color='red', s=100, zorder=5, label='Current')
 
         # Best L/D point
-        best_aoa, best_ld, best_cl = performance.find_best_glide_ratio(params['flap_setting'])
+        weather_data = params.get('weather', {})
+        best_aoa, best_ld, best_cl = performance.find_best_glide_ratio(
+            params['flap_setting'], pressure_hpa=weather_data.get('pressure_hpa'))
         best_cd = models.cd_from_cl(best_cl, params['flap_setting'])
         ax.scatter(best_cd, best_cl, color='green', s=100, zorder=5,
                   marker='*', label=f'Best L/D: {best_ld:.1f}')
@@ -275,9 +287,14 @@ class PerformanceSummaryPlot(InteractivePlotCanvas):
         flap_data = []
         flaps = ['clean', '+1', '+2', 'L', 'S']
 
+        weather_data = params.get('weather', {})
         for flap in flaps:
-            _, best_ld, _ = performance.find_best_glide_ratio(flap)
-            best_speed, _ = performance.best_glide_speed(params['altitude'], flap)
+            _, best_ld, _ = performance.find_best_glide_ratio(
+                flap, pressure_hpa=weather_data.get('pressure_hpa'))
+            best_speed, _ = performance.best_glide_speed(
+                params['altitude'], flap, 
+                params.get('surface_temp', 288.15), params.get('relative_humidity', 50.0),
+                pressure_hpa=weather_data.get('pressure_hpa'))
             flap_data.append({
                 'Flap': flap,
                 'Best L/D': best_ld,
@@ -296,12 +313,15 @@ class PerformanceSummaryPlot(InteractivePlotCanvas):
         original_ballast = models.aircraft.ballast_kg
         original_pilot_eq = models.aircraft.pilot_and_eq
 
+        weather_data = params.get('weather', {})
         for ballast in ballast_range:
             # Temporarily change ballast but keep other params
             models.aircraft.ballast_kg = ballast
             wing_loading = models.aircraft.total_mass * 9.80665 / models.aircraft.wing.area_m2
-            _, best_ld, _ = performance.find_best_glide_ratio()
-            best_speed, _ = performance.best_glide_speed()
+            _, best_ld, _ = performance.find_best_glide_ratio(
+                pressure_hpa=weather_data.get('pressure_hpa'))
+            best_speed, _ = performance.best_glide_speed(
+                pressure_hpa=weather_data.get('pressure_hpa'))
             mass_data.append({
                 'Ballast [kg]': ballast,
                 'Wing Loading [N/m²]': wing_loading,
@@ -327,14 +347,17 @@ class PerformanceSummaryPlot(InteractivePlotCanvas):
         bank_angle = params.get('bank_angle', 0.0)
         surface_temp = params.get('surface_temp', 288.15)
         relative_humidity = params.get('relative_humidity', 50.0)
+        weather_data = params.get('weather', {})
         
         lift = models.lift(
             params['airspeed'], params['altitude'], params['aoa'],
-            surface_temp, relative_humidity, params['flap_setting'], bank_angle
+            surface_temp, relative_humidity, params['flap_setting'], bank_angle,
+            pressure_hpa=weather_data.get('pressure_hpa')
         )
         drag = models.drag(
             params['airspeed'], params['altitude'], params['aoa'],
-            surface_temp, relative_humidity, params['flap_setting']
+            surface_temp, relative_humidity, params['flap_setting'],
+            pressure_hpa=weather_data.get('pressure_hpa')
         )
         cl = models.cl_from_aoa(params['aoa'], params['flap_setting'])
         cd = models.cd_from_cl(cl, params['flap_setting'])

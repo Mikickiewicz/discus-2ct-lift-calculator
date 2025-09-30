@@ -18,7 +18,8 @@ class PerformanceCalculator:
                               altitude: float = 1000.0,
                               surface_temp: float = 288.15,
                               relative_humidity: float = 50.0,
-                              bank_angle_deg: float = 0.0) -> tuple[float, float, float]:
+                              bank_angle_deg: float = 0.0,
+                              pressure_hpa: float = None) -> tuple[float, float, float]:
         """
         Find optimal AoA for best L/D, accounting for mass, altitude, atmosphere, bank.
         Returns: (best_aoa, best_LD_ratio, CL_at_best)
@@ -27,7 +28,10 @@ class PerformanceCalculator:
         best_aoa = 0.0
         best_cl = 0.0
 
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+        # Convert pressure from hPa to Pa if provided
+        pressure_pa = pressure_hpa * 100 if pressure_hpa is not None else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity, 
+                                   pressure_override=pressure_pa)
         wing_area = self.aircraft.wing.area_m2
         lift_required = self.lift_model.lift_required_for_level_flight(bank_angle_deg=bank_angle_deg)
 
@@ -54,7 +58,8 @@ class PerformanceCalculator:
         return best_aoa, best_ld, best_cl
 
     def best_glide_speed(self, altitude: float = 0, flap_setting: str = 'clean',
-                        surface_temp: float = 288.15, relative_humidity: float = 50.0) -> Tuple[float, float]:
+                        surface_temp: float = 288.15, relative_humidity: float = 50.0,
+                        pressure_hpa: float = None) -> Tuple[float, float]:
         """
         Calculate optimal glide speed (best L/D).
         
@@ -63,14 +68,18 @@ class PerformanceCalculator:
             flap_setting (str): flap configuration
             surface_temp (float): surface temperature [K]
             relative_humidity (float): relative humidity [%]
+            pressure_hpa (float): atmospheric pressure in hPa
             
         Returns:
             tuple: (optimal_speed_ms, best_LD_ratio)
         """
-        best_aoa, best_ld, best_cl = self.find_best_glide_ratio(flap_setting)
+        best_aoa, best_ld, best_cl = self.find_best_glide_ratio(flap_setting, 
+                                                               pressure_hpa=pressure_hpa)
         
         # Calculate air density
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+        pressure_pa = pressure_hpa * 100 if pressure_hpa is not None else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity,
+                                   pressure_override=pressure_pa)
         
         # Calculate speed for given CL: V = sqrt(2*W/(rho*S*CL))
         weight = self.aircraft.total_mass * Atmosphere.GRAVITY
@@ -80,7 +89,8 @@ class PerformanceCalculator:
         return optimal_speed, best_ld
     
     def speed_to_fly(self, sink_rate_air_mass: float, altitude: float = 0, 
-                    surface_temp: float = 288.15, relative_humidity: float = 50.0) -> float:
+                    surface_temp: float = 288.15, relative_humidity: float = 50.0,
+                    pressure_hpa: float = None) -> float:
         """
         Calculate speed to fly in given air mass (MacCready theory).
         
@@ -88,12 +98,14 @@ class PerformanceCalculator:
             sink_rate_air_mass (float): air mass sink rate [m/s] (+ sinking, - rising)
             altitude (float): altitude [m]
             surface_temp, relative_humidity: atmospheric conditions
+            pressure_hpa (float): atmospheric pressure in hPa
             
         Returns:
             float: speed to fly [m/s]
         """
         # Find optimal glide speed
-        optimal_speed, best_ld = self.best_glide_speed(altitude, 'clean', surface_temp, relative_humidity)
+        optimal_speed, best_ld = self.best_glide_speed(altitude, 'clean', surface_temp, 
+                                                      relative_humidity, pressure_hpa)
         
         # MacCready speed-to-fly (simplified version)
         if sink_rate_air_mass <= 0:  # Rising or neutral
@@ -104,7 +116,8 @@ class PerformanceCalculator:
     
     def performance_at_speed(self, speed_ms: float, altitude: float = 0, 
                            flap_setting: str = 'clean', surface_temp: float = 288.15, 
-                           relative_humidity: float = 50.0, bank_angle_deg: float = 0.0) -> Dict[str, float]:
+                           relative_humidity: float = 50.0, bank_angle_deg: float = 0.0,
+                           pressure_hpa: float = None) -> Dict[str, float]:
         """
         Calculate performance parameters at given speed.
         
@@ -112,7 +125,9 @@ class PerformanceCalculator:
             Dict containing: aoa, lift, drag, ld_ratio, sink_rate, cl, cd
         """
         # Calculate required CL for level flight (with bank angle)
-        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity)
+        pressure_pa = pressure_hpa * 100 if pressure_hpa is not None else None
+        rho = Atmosphere.air_density(altitude, surface_temp, relative_humidity,
+                                   pressure_override=pressure_pa)
         weight = self.aircraft.total_mass * Atmosphere.GRAVITY
         wing_area = self.aircraft.wing.area_m2
         
@@ -132,8 +147,10 @@ class PerformanceCalculator:
             return {}
         
         # Calculate parameters
-        lift = self.lift_model.lift(speed_ms, altitude, required_aoa, surface_temp, relative_humidity, flap_setting)
-        drag = self.lift_model.drag(speed_ms, altitude, required_aoa, surface_temp, relative_humidity, flap_setting)
+        lift = self.lift_model.lift(speed_ms, altitude, required_aoa, surface_temp, 
+                                  relative_humidity, flap_setting, pressure_hpa=pressure_hpa)
+        drag = self.lift_model.drag(speed_ms, altitude, required_aoa, surface_temp, 
+                                  relative_humidity, flap_setting, pressure_hpa=pressure_hpa)
         ld_ratio = self.lift_model.lift_to_drag_ratio(required_aoa, flap_setting)
         sink_rate = speed_ms / ld_ratio if ld_ratio > 0 else float('inf')
         cl = self.lift_model.cl_from_aoa(required_aoa, flap_setting)
