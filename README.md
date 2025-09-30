@@ -22,13 +22,6 @@ I kept everything in a simple engineering form, so it’s easy to read and debug
 
 ---
 
-## Version 2 Roadmap
-- Weather API integration (utilizing `program/environment.py` and `program/weather.py`)
-- Real-time atmospheric condition monitoring
-- Enhanced performance calculations with live weather data
-
----
-
 ## What’s next (Version 2+ roadmap (Future))
 - Asynchronous data handling (so weather updates don’t block the GUI)  
 - Model improvements:  
