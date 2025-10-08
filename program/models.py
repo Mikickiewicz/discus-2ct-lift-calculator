@@ -54,7 +54,9 @@ class Atmosphere:
 
     @staticmethod
     def air_density(altitude_m: float, surface_temp: float, relative_humidity: float, 
-                   sea_level_pressure: float = 101325.0,) -> float:
+                     sea_level_pressure: float = 101325.0, pressure_override: float = None) -> float:
+
+
         """
         Calculate the density of moist air at a given altitude.
 
