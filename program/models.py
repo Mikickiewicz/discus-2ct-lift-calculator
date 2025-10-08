@@ -54,7 +54,7 @@ class Atmosphere:
 
     @staticmethod
     def air_density(altitude_m: float, surface_temp: float, relative_humidity: float, 
-                   sea_level_pressure: float = 101325.0, pressure_override: float = None) -> float:
+                   sea_level_pressure: float = 101325.0,) -> float:
         """
         Calculate the density of moist air at a given altitude.
 
@@ -63,7 +63,6 @@ class Atmosphere:
             surface_temp (float): Surface temperature in Kelvin
             relative_humidity (float): Relative humidity in percent (0-100)
             sea_level_pressure (float): Pressure at sea level in Pa (default 101325 Pa)
-            pressure_override (float): Direct pressure in Pa (overrides altitude calculation)
 
         Returns:
             float: Air density in kg/m³
@@ -72,13 +71,7 @@ class Atmosphere:
 
         # Calculate temperature at altitude
         temp = surface_temp - lapse_rate * altitude_m
-        
-        # Use direct pressure if provided, otherwise calculate from altitude
-        if pressure_override is not None:
-            pressure = pressure_override
-        else:
-            # Troposphere approximation (below 11 km)
-            pressure = sea_level_pressure * (temp / surface_temp) ** (Atmosphere.GRAVITY / (Atmosphere.R_D * lapse_rate))
+        pressure = sea_level_pressure * (temp / surface_temp) ** (Atmosphere.GRAVITY / (Atmosphere.R_D * lapse_rate))
 
         # Saturation vapor pressure (Tetens formula) [hPa]
         e_s = 6.1078 * 10 ** ((7.5 * (temp - 273.15)) / (temp - 35.85))
