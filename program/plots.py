@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import pandas as pd
@@ -48,6 +47,10 @@ class CLvsAoAPlot(InteractivePlotCanvas):
         # Plot with seaborn
         df = pd.DataFrame({'AoA': aoa_range, 'CL': cl_data})
         sns.lineplot(data=df, x='AoA', y='CL', ax=ax, linewidth=2.5, color='blue')
+        
+        # Find actual maximum CL from the plotted data
+        max_cl_idx = np.argmax(cl_data)
+        actual_stall_aoa = aoa_range[max_cl_idx]
 
         # Mark stall AoA and show stall speed
         bank_angle = params.get('bank_angle', 0.0)
@@ -60,8 +63,8 @@ class CLvsAoAPlot(InteractivePlotCanvas):
         )
         stall_speed_kmh = stall_speed_ms * 3.6
         
-        ax.axvline(x=nominal_stall_aoa, color='orange', linestyle='--', alpha=0.7, 
-                  label=f'Stall AoA: {nominal_stall_aoa:.1f}° (V_s: {stall_speed_kmh:.0f} km/h)')
+        ax.axvline(x=actual_stall_aoa, color='orange', linestyle='--', alpha=0.7, 
+                  label=f'Stall AoA: {actual_stall_aoa:.1f}° (V_s: {stall_speed_kmh:.0f} km/h)')
 
         # Current point - use model directly (no duplicate logic)
         current_cl = models.cl_from_aoa(params['aoa'], params['flap_setting'])

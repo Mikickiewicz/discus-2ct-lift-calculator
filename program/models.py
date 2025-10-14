@@ -129,7 +129,7 @@ class LiftModel:
             'S': (-0.06, 0.004, +0.7)     # Negative flap - less effective
         }
         return flap_corrections.get(flap_setting, (0.0, 0.0, 0.0))
-        # cd after claps change
+        # CD values after flap configuration change
 
     def cd_from_cl(self, cl: float, flap_setting: str = 'clean') -> float:
         _, delta_cd, _ = self.flap_correction(flap_setting)
@@ -177,23 +177,24 @@ class LiftModel:
             # Ensure we approach but don't exceed cl_max
             return min(cl_result, cl_max)
         else:
-            # Post-stall: Implement Viterna-Corrigan type model
-
+            # Post-stall: Simple exponential decay from maximum CL
+            # More realistic than complex Viterna-Corrigan for gliders
             
-            overshoot = aoa_deg - nominal_stall_aoa
+            overshoot = aoa_deg - nominal_stall_aoa  # How far past stall
             
-            # Viterna-Corrigan coefficients (empirically derived)
-            A1 = cl_max / 2.0  # Controls deep stall level
-            nominal_stall_aoa_rad = math.radians(nominal_stall_aoa)
-            A2 = (cl_max - cl_max * math.cos(nominal_stall_aoa_rad)) / (math.sin(nominal_stall_aoa_rad) ** 2)
+            # Start from cl_max and decay exponentially
+            # Decay rate: faster initially, then slower
+            decay_rate = 0.15  # Adjust this to control how quickly CL drops
+            cl_post = cl_max * math.exp(-decay_rate * overshoot)
             
-            # Post-stall CL using trigonometric model
-            aoa_rad_current = math.radians(aoa_deg)
-            cl_post = A1 * math.sin(2.0 * aoa_rad_current) + A2 * (math.cos(aoa_rad_current) ** 2) / math.sin(aoa_rad_current)
+            # Add some oscillation for deep stall (typical behavior)
+            if overshoot > 5:  # Only for deep stall
+                oscillation = 0.1 * math.sin(0.5 * overshoot) 
+                cl_post += oscillation
             
-            # Ensure reasonable bounds
+            # Ensure reasonable bounds - don't go negative or too high
             cl_post = max(cl_post, 0.2)  # Minimum CL in deep stall
-            cl_post = min(cl_post, cl_max * 0.8)  # Don't exceed 80% of max
+            cl_post = min(cl_post, cl_max * 0.95)  # Cap just below max
             
             return cl_post
 

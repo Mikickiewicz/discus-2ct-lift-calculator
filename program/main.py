@@ -1,17 +1,10 @@
-import asyncio
-from qasync import QEventLoop
+import sys
 from gui import init_gui
 
-async def main():
+def main():
     app, window = init_gui()
-
-    loop = QEventLoop(app)
-    asyncio.set_event_loop(loop)
-
-
     print("Discus-2cT Lift Calculator started")
+    sys.exit(app.exec())
 
-    with loop:
-        loop.run_forever()
-
-asyncio.run(main())
+if __name__ == "__main__":
+    main()
